@@ -19,6 +19,9 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const search = searchParams.get("search") || "";
     const status = searchParams.get("status") || "";
+    const dateFrom = searchParams.get("dateFrom") || "";
+    const dateTo = searchParams.get("dateTo") || "";
+    const sort = searchParams.get("sort") || "newest";
 
     const query: Record<string, unknown> = { userId: new mongoose.Types.ObjectId(userId) };
 
@@ -33,7 +36,27 @@ export async function GET(request: Request) {
       query.status = status;
     }
 
-    const invoices = await Invoice.find(query).sort({ createdAt: -1 });
+    if (dateFrom || dateTo) {
+      const dateFilter: Record<string, Date> = {};
+      if (dateFrom) dateFilter.$gte = new Date(dateFrom);
+      if (dateTo) {
+        const d = new Date(dateTo);
+        d.setDate(d.getDate() + 1);
+        dateFilter.$lt = d;
+      }
+      query.invoiceDate = dateFilter;
+    }
+
+    const sortOptions: Record<string, Record<string, 1 | -1>> = {
+      newest: { createdAt: -1 },
+      oldest: { createdAt: 1 },
+      "amount-high": { total: -1 },
+      "amount-low": { total: 1 },
+      "customer-az": { customerName: 1 },
+      "customer-za": { customerName: -1 },
+    };
+
+    const invoices = await Invoice.find(query).sort(sortOptions[sort] || sortOptions.newest);
 
     return NextResponse.json({ invoices });
   } catch (error) {

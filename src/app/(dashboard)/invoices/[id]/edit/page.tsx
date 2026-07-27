@@ -1,11 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
+import { useParams, useRouter } from "next/navigation";
 import Input from "@/components/ui/Input";
 import Button from "@/components/ui/Button";
 import { numberToWords, formatCurrency } from "@/lib/utils";
-import { SIHOR_VILLAGES } from "@/lib/constants";
 
 interface Customer {
   _id: string;
@@ -34,14 +33,37 @@ interface InvoiceItem {
   gstAmount: number;
 }
 
-export default function NewInvoicePage() {
+interface Invoice {
+  _id: string;
+  invoiceNumber: string;
+  invoiceDate: string;
+  customerName: string;
+  customerEmail: string;
+  customerPhone: string;
+  customerAddress: string;
+  customerGstNumber: string;
+  items: InvoiceItem[];
+  subtotal: number;
+  totalGst: number;
+  discount: number;
+  discountType: string;
+  roundOff: number;
+  total: number;
+  status: string;
+  notes: string;
+}
+
+export default function EditInvoicePage() {
+  const params = useParams();
   const router = useRouter();
+  const invoiceId = params.id as string;
 
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [invoiceDate, setInvoiceDate] = useState("");
-  const [status, setStatus] = useState<"draft" | "pending" | "paid">("draft");
+  const [status, setStatus] = useState<"draft" | "pending" | "paid" | "overdue">("draft");
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
+  const [loadingInvoice, setLoadingInvoice] = useState(true);
   const [error, setError] = useState("");
 
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -49,54 +71,46 @@ export default function NewInvoicePage() {
   const [customerSearch, setCustomerSearch] = useState("");
   const [showCustomerDropdown, setShowCustomerDropdown] = useState(false);
 
-  const [selectedVillage, setSelectedVillage] = useState("");
-  const [isManualCustomer, setIsManualCustomer] = useState(false);
-  const [manualCustomerName, setManualCustomerName] = useState("");
-
   const [products, setProducts] = useState<Product[]>([]);
   const [productSearch, setProductSearch] = useState("");
   const [showProductDropdown, setShowProductDropdown] = useState<number | null>(null);
 
-  const [items, setItems] = useState<InvoiceItem[]>([
-    { productName: "", description: "", quantity: 1, rate: 0, amount: 0, gstPercent: 0, gstAmount: 0 },
-  ]);
-
+  const [items, setItems] = useState<InvoiceItem[]>([]);
   const [discount, setDiscount] = useState("0");
   const [discountType, setDiscountType] = useState<"fixed" | "percent">("fixed");
 
-  const fetchedRef = useRef(false);
-
   useEffect(() => {
-    if (fetchedRef.current) return;
-    fetchedRef.current = true;
-
     async function init() {
-      const d = new Date();
-      const today = d.toISOString().split("T")[0];
-      setInvoiceDate(today);
-
-      const [numRes, custRes, prodRes] = await Promise.all([
-        fetch("/api/invoices/number"),
+      const [invRes, custRes, prodRes] = await Promise.all([
+        fetch(`/api/invoices/${invoiceId}`),
         fetch("/api/customers"),
         fetch("/api/products"),
       ]);
 
-      if (numRes.ok) {
-        const numData = await numRes.json();
-        setInvoiceNumber(numData.invoiceNumber);
+      if (invRes.ok) {
+        const data = await invRes.json();
+        const inv: Invoice = data.invoice;
+        setInvoiceNumber(inv.invoiceNumber);
+        setInvoiceDate(inv.invoiceDate);
+        setStatus(inv.status as "draft" | "pending" | "paid" | "overdue");
+        setNotes(inv.notes);
+        setItems(inv.items);
+        setDiscount(String(inv.discount));
+        setDiscountType(inv.discountType as "fixed" | "percent");
       }
       if (custRes.ok) {
-        const custData = await custRes.json();
-        setCustomers(custData.customers);
+        const data = await custRes.json();
+        setCustomers(data.customers);
       }
       if (prodRes.ok) {
-        const prodData = await prodRes.json();
-        setProducts(prodData.products);
+        const data = await prodRes.json();
+        setProducts(data.products);
       }
+      setLoadingInvoice(false);
     }
 
     init();
-  }, []);
+  }, [invoiceId]);
 
   const selectCustomer = (customer: Customer) => {
     setSelectedCustomer(customer);
@@ -116,13 +130,11 @@ export default function NewInvoicePage() {
   const updateItem = (index: number, field: keyof InvoiceItem, value: string | number) => {
     const updated = [...items];
     const item = { ...updated[index] };
-
     if (field === "quantity" || field === "rate" || field === "gstPercent") {
       item[field] = typeof value === "string" ? parseFloat(value) || 0 : value;
     } else if (field === "productName" || field === "description") {
       item[field] = String(value);
     }
-
     item.amount = item.quantity * item.rate;
     item.gstAmount = (item.amount * item.gstPercent) / 100;
     updated[index] = item;
@@ -180,9 +192,7 @@ export default function NewInvoicePage() {
     const invoiceData = {
       invoiceNumber,
       invoiceDate,
-      customerName: isManualCustomer
-        ? manualCustomerName || selectedCustomer?.name || ""
-        : selectedVillage || selectedCustomer?.name || "",
+      customerName: selectedCustomer?.name || "",
       customerEmail: selectedCustomer?.email || "",
       customerPhone: selectedCustomer?.mobile || "",
       customerAddress: selectedCustomer?.address || "",
@@ -199,32 +209,39 @@ export default function NewInvoicePage() {
     };
 
     try {
-      const res = await fetch("/api/invoices", {
-        method: "POST",
+      const res = await fetch(`/api/invoices/${invoiceId}`, {
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(invoiceData),
       });
 
       if (!res.ok) {
         const data = await res.json();
-        setError(data.error || "Failed to create invoice");
+        setError(data.error || "Failed to update invoice");
       } else {
-        const data = await res.json();
-        router.push(`/invoices/${data.invoice._id}/preview`);
+        router.push(`/invoices/${invoiceId}/preview`);
       }
     } catch {
-      setError("Failed to create invoice");
+      setError("Failed to update invoice");
     } finally {
       setSaving(false);
     }
   };
 
+  if (loadingInvoice) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-600 border-t-transparent" />
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto max-w-5xl space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Create Invoice</h1>
-          <p className="mt-1 text-sm text-gray-600">Fill in the details to generate a new invoice.</p>
+          <h1 className="text-2xl font-bold text-gray-900">Edit Invoice</h1>
+          <p className="mt-1 text-sm text-gray-600">Update invoice details.</p>
         </div>
         <Button variant="ghost" onClick={() => router.back()}>
           <svg className="mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -241,7 +258,6 @@ export default function NewInvoicePage() {
       )}
 
       <form onSubmit={handleSave} className="space-y-6">
-        {/* Invoice Header */}
         <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <Input
@@ -263,139 +279,81 @@ export default function NewInvoicePage() {
               <label className="block text-sm font-medium text-gray-700">Status</label>
               <select
                 value={status}
-                onChange={(e) => setStatus(e.target.value as "draft" | "pending" | "paid")}
+                onChange={(e) => setStatus(e.target.value as "draft" | "pending" | "paid" | "overdue")}
                 className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 sm:text-sm"
               >
                 <option value="draft">Draft</option>
                 <option value="pending">Pending</option>
                 <option value="paid">Paid</option>
+                <option value="overdue">Overdue</option>
               </select>
             </div>
           </div>
         </div>
 
-        {/* Customer Selection */}
         <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-          <h2 className="mb-4 text-lg font-semibold text-gray-900">Customer (Village)</h2>
-
-          {/* Mode toggle */}
-          <div className="mb-4 flex gap-2">
-            <button
-              type="button"
-              onClick={() => { setIsManualCustomer(false); setSelectedCustomer(null); setManualCustomerName(""); }}
-              className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-                !isManualCustomer ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-              }`}
-            >
-              Select Village
-            </button>
-            <button
-              type="button"
-              onClick={() => { setIsManualCustomer(true); setSelectedVillage(""); }}
-              className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-                isManualCustomer ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-              }`}
-            >
-              Manual Entry
-            </button>
-          </div>
-
-          {!isManualCustomer ? (
-            /* Village Dropdown */
-            <div className="relative">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Select Village</label>
-              <select
-                value={selectedVillage}
-                onChange={(e) => setSelectedVillage(e.target.value)}
-                className="block w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="">-- Select a village --</option>
-                {SIHOR_VILLAGES.map((village) => (
-                  <option key={village} value={village}>{village}</option>
-                ))}
-              </select>
-              {selectedVillage && (
-                <div className="mt-3 flex items-center justify-between rounded-lg border border-green-200 bg-green-50 p-3">
-                  <div className="flex items-center gap-2">
-                    <svg className="h-5 w-5 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
-                    <span className="text-sm font-medium text-green-800">{selectedVillage}</span>
-                  </div>
-                  <button type="button" onClick={() => setSelectedVillage("")} className="text-green-600 hover:text-green-800">
-                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                </div>
-              )}
-            </div>
-          ) : (
-            /* Manual Entry */
-            <div className="space-y-4">
-              <Input
-                id="manualCustomerName"
-                label="Customer Name"
-                placeholder="Enter customer name..."
-                value={manualCustomerName}
-                onChange={(e) => setManualCustomerName(e.target.value)}
-              />
-              <div className="relative">
-                <svg className="absolute left-3 top-8 h-5 w-5 -translate-y-1/2 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                </svg>
-                <input
-                  type="text"
-                  placeholder="Or search saved customer..."
-                  value={customerSearch}
-                  onChange={(e) => { setCustomerSearch(e.target.value); setShowCustomerDropdown(true); }}
-                  onFocus={() => setShowCustomerDropdown(true)}
-                  className="w-full rounded-lg border border-gray-300 py-2.5 pl-10 pr-4 text-sm shadow-sm placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-                {showCustomerDropdown && customerSearch && (
-                  <div className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
-                    {filteredCustomers.length === 0 ? (
-                      <div className="px-4 py-3 text-sm text-gray-500">No customers found</div>
-                    ) : (
-                      filteredCustomers.map((customer) => (
-                        <button
-                          key={customer._id}
-                          type="button"
-                          onClick={() => selectCustomer(customer)}
-                          className="flex w-full items-center justify-between px-4 py-3 text-left text-sm hover:bg-gray-50"
-                        >
-                          <div>
-                            <p className="font-medium text-gray-900">{customer.name}</p>
-                            <p className="text-xs text-gray-500">{customer.mobile} {customer.email}</p>
-                          </div>
-                        </button>
-                      ))
-                    )}
-                  </div>
+          <h2 className="mb-4 text-lg font-semibold text-gray-900">Customer</h2>
+          {selectedCustomer ? (
+            <div className="flex items-center justify-between rounded-lg border border-blue-200 bg-blue-50 p-4">
+              <div>
+                <p className="font-medium text-gray-900">{selectedCustomer.name}</p>
+                <p className="text-sm text-gray-600">
+                  {selectedCustomer.mobile && selectedCustomer.mobile}
+                  {selectedCustomer.mobile && selectedCustomer.email && " · "}
+                  {selectedCustomer.email}
+                </p>
+                {selectedCustomer.gstNumber && (
+                  <p className="text-xs text-gray-500">GST: {selectedCustomer.gstNumber}</p>
                 )}
               </div>
-              {selectedCustomer && (
-                <div className="flex items-center justify-between rounded-lg border border-blue-200 bg-blue-50 p-3">
-                  <div>
-                    <p className="font-medium text-gray-900">{selectedCustomer.name}</p>
-                    <p className="text-sm text-gray-600">
-                      {selectedCustomer.mobile && selectedCustomer.mobile}
-                      {selectedCustomer.mobile && selectedCustomer.email && " · "}
-                      {selectedCustomer.email}
-                    </p>
-                  </div>
-                  <button type="button" onClick={() => setSelectedCustomer(null)} className="rounded p-1 text-gray-400 hover:bg-white hover:text-gray-600">
-                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
+              <button
+                type="button"
+                onClick={() => setSelectedCustomer(null)}
+                className="rounded-lg p-2 text-gray-400 hover:bg-white hover:text-gray-600"
+              >
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          ) : (
+            <div className="relative">
+              <svg className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              <input
+                type="text"
+                placeholder="Search customer by name, mobile, or email..."
+                value={customerSearch}
+                onChange={(e) => { setCustomerSearch(e.target.value); setShowCustomerDropdown(true); }}
+                onFocus={() => setShowCustomerDropdown(true)}
+                className="w-full rounded-lg border border-gray-300 py-2.5 pl-10 pr-4 text-sm shadow-sm placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              {showCustomerDropdown && customerSearch && (
+                <div className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
+                  {filteredCustomers.length === 0 ? (
+                    <div className="px-4 py-3 text-sm text-gray-500">No customers found</div>
+                  ) : (
+                    filteredCustomers.map((customer) => (
+                      <button
+                        key={customer._id}
+                        type="button"
+                        onClick={() => selectCustomer(customer)}
+                        className="flex w-full items-center justify-between px-4 py-3 text-left text-sm hover:bg-gray-50"
+                      >
+                        <div>
+                          <p className="font-medium text-gray-900">{customer.name}</p>
+                          <p className="text-xs text-gray-500">{customer.mobile} {customer.email}</p>
+                        </div>
+                      </button>
+                    ))
+                  )}
                 </div>
               )}
             </div>
           )}
         </div>
 
-        {/* Line Items */}
         <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
           <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
             <h2 className="text-lg font-semibold text-gray-900">Items</h2>
@@ -413,11 +371,7 @@ export default function NewInvoicePage() {
                 <div className="mb-3 flex items-center justify-between">
                   <span className="text-sm font-medium text-gray-700">Item {index + 1}</span>
                   {items.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => removeItem(index)}
-                      className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"
-                    >
+                    <button type="button" onClick={() => removeItem(index)} className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600">
                       <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                       </svg>
@@ -426,21 +380,19 @@ export default function NewInvoicePage() {
                 </div>
 
                 <div className="mb-2 relative">
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      placeholder="Select or type product name..."
-                      value={item.productName}
-                      onChange={(e) => {
-                        updateItem(index, "productName", e.target.value);
-                        updateItem(index, "description", e.target.value);
-                        setProductSearch(e.target.value);
-                        setShowProductDropdown(index);
-                      }}
-                      onFocus={() => { setProductSearch(""); setShowProductDropdown(index); }}
-                      className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
+                  <input
+                    type="text"
+                    placeholder="Select or type product name..."
+                    value={item.productName}
+                    onChange={(e) => {
+                      updateItem(index, "productName", e.target.value);
+                      updateItem(index, "description", e.target.value);
+                      setProductSearch(e.target.value);
+                      setShowProductDropdown(index);
+                    }}
+                    onFocus={() => { setProductSearch(""); setShowProductDropdown(index); }}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
                   {showProductDropdown === index && (
                     <div className="absolute z-10 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
                       {filteredProducts(productSearch).length === 0 ? (
@@ -465,33 +417,9 @@ export default function NewInvoicePage() {
                 </div>
 
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-                  <Input
-                    id={`qty-${index}`}
-                    label="Qty"
-                    type="number"
-                    min="1"
-                    value={item.quantity.toString()}
-                    onChange={(e) => updateItem(index, "quantity", e.target.value)}
-                  />
-                  <Input
-                    id={`rate-${index}`}
-                    label="Rate"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={item.rate.toString()}
-                    onChange={(e) => updateItem(index, "rate", e.target.value)}
-                  />
-                  <Input
-                    id={`gst-${index}`}
-                    label="GST %"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    max="100"
-                    value={item.gstPercent.toString()}
-                    onChange={(e) => updateItem(index, "gstPercent", e.target.value)}
-                  />
+                  <Input id={`qty-${index}`} label="Qty" type="number" min="1" value={item.quantity.toString()} onChange={(e) => updateItem(index, "quantity", e.target.value)} />
+                  <Input id={`rate-${index}`} label="Rate" type="number" step="0.01" min="0" value={item.rate.toString()} onChange={(e) => updateItem(index, "rate", e.target.value)} />
+                  <Input id={`gst-${index}`} label="GST %" type="number" step="0.01" min="0" max="100" value={item.gstPercent.toString()} onChange={(e) => updateItem(index, "gstPercent", e.target.value)} />
                   <div className="flex items-end">
                     <div className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm">
                       <p className="text-xs text-gray-500">Amount</p>
@@ -510,9 +438,7 @@ export default function NewInvoicePage() {
           </div>
         </div>
 
-        {/* Totals */}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          {/* Notes */}
           <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
             <h2 className="mb-3 text-lg font-semibold text-gray-900">Notes</h2>
             <textarea
@@ -524,7 +450,6 @@ export default function NewInvoicePage() {
             />
           </div>
 
-          {/* Summary */}
           <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
             <h2 className="mb-4 text-lg font-semibold text-gray-900">Summary</h2>
             <div className="space-y-3">
@@ -574,11 +499,11 @@ export default function NewInvoicePage() {
             </div>
 
             <div className="mt-6 flex gap-3">
-              <Button type="button" variant="secondary" className="flex-1" onClick={() => { setStatus("draft"); }}>
-                Save as Draft
+              <Button type="button" variant="secondary" className="flex-1" onClick={() => router.back()}>
+                Cancel
               </Button>
               <Button type="submit" className="flex-1" loading={saving}>
-                Create Invoice
+                Save Changes
               </Button>
             </div>
           </div>

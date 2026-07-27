@@ -23,18 +23,11 @@ const statusStyles: Record<string, string> = {
 };
 
 function formatCurrency(amount: number) {
-  return new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-  }).format(amount);
+  return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" }).format(amount);
 }
 
 function formatDate(dateStr: string) {
-  return new Date(dateStr).toLocaleDateString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
+  return new Date(dateStr).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
 
 export default function InvoicesPage() {
@@ -43,16 +36,24 @@ export default function InvoicesPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
+  const [sortBy, setSortBy] = useState("newest");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [duplicating, setDuplicating] = useState<string | null>(null);
+  const [showFilters, setShowFilters] = useState(false);
 
   const fetchedRef = useRef(false);
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const loadInvoices = async (q = "", status = "") => {
+  const loadInvoices = async (q = "", status = "", sort = "newest", dFrom = "", dTo = "") => {
     try {
       const params = new URLSearchParams();
       if (q) params.set("search", q);
       if (status) params.set("status", status);
+      if (sort) params.set("sort", sort);
+      if (dFrom) params.set("dateFrom", dFrom);
+      if (dTo) params.set("dateTo", dTo);
       const query = params.toString();
       const res = await fetch(`/api/invoices${query ? `?${query}` : ""}`);
       if (res.ok) {
@@ -76,13 +77,20 @@ export default function InvoicesPage() {
     setSearch(value);
     if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
     searchTimeoutRef.current = setTimeout(() => {
-      loadInvoices(value, filterStatus);
+      loadInvoices(value, filterStatus, sortBy, dateFrom, dateTo);
     }, 300);
   };
 
-  const handleStatusFilter = (status: string) => {
-    setFilterStatus(status);
-    loadInvoices(search, status);
+  const handleFilterChange = (newStatus?: string, newSort?: string, newDateFrom?: string, newDateTo?: string) => {
+    const s = newStatus !== undefined ? newStatus : filterStatus;
+    const so = newSort !== undefined ? newSort : sortBy;
+    const df = newDateFrom !== undefined ? newDateFrom : dateFrom;
+    const dt = newDateTo !== undefined ? newDateTo : dateTo;
+    if (newStatus !== undefined) setFilterStatus(newStatus);
+    if (newSort !== undefined) setSortBy(newSort);
+    if (newDateFrom !== undefined) setDateFrom(newDateFrom);
+    if (newDateTo !== undefined) setDateTo(newDateTo);
+    loadInvoices(search, s, so, df, dt);
   };
 
   const handleDelete = async (id: string) => {
@@ -105,14 +113,48 @@ export default function InvoicesPage() {
         body: JSON.stringify({ status: newStatus }),
       });
       if (res.ok) {
-        setInvoices((prev) =>
-          prev.map((inv) => (inv._id === id ? { ...inv, status: newStatus } : inv))
-        );
+        setInvoices((prev) => prev.map((inv) => (inv._id === id ? { ...inv, status: newStatus } : inv)));
       }
     } catch {
       console.error("Failed to update status");
     }
   };
+
+  const handleDuplicate = async (id: string) => {
+    setDuplicating(id);
+    try {
+      const res = await fetch(`/api/invoices/${id}/duplicate`, { method: "POST" });
+      if (res.ok) {
+        const data = await res.json();
+        router.push(`/invoices/${data.invoice._id}/edit`);
+      }
+    } catch {
+      console.error("Failed to duplicate invoice");
+    } finally {
+      setDuplicating(null);
+    }
+  };
+
+  const handleExportCSV = () => {
+    const headers = ["Invoice #", "Customer", "Date", "Amount", "Status"];
+    const rows = invoices.map((inv) => [
+      inv.invoiceNumber,
+      inv.customerName,
+      formatDate(inv.invoiceDate || inv.createdAt),
+      inv.total.toFixed(2),
+      inv.status,
+    ]);
+    const csv = [headers, ...rows].map((r) => r.join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `invoices-export-${new Date().toISOString().split("T")[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const activeFilters = (filterStatus ? 1 : 0) + (dateFrom ? 1 : 0) + (dateTo ? 1 : 0) + (sortBy !== "newest" ? 1 : 0);
 
   if (loading) {
     return (
@@ -129,36 +171,77 @@ export default function InvoicesPage() {
           <h1 className="text-2xl font-bold text-gray-900">Invoices</h1>
           <p className="mt-1 text-sm text-gray-600">Manage and track all your invoices.</p>
         </div>
-        <Link href="/invoices/new">
-          <Button>
-            <svg className="mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+        <div className="flex gap-2">
+          <Button variant="secondary" size="sm" onClick={handleExportCSV}>
+            <svg className="mr-1 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
             </svg>
-            New Invoice
+            Export CSV
           </Button>
-        </Link>
+          <Link href="/invoices/new">
+            <Button>
+              <svg className="mr-2 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              New Invoice
+            </Button>
+          </Link>
+        </div>
       </div>
 
-      {/* Search & Filters */}
-      <div className="flex flex-col gap-4 sm:flex-row">
-        <div className="relative flex-1">
-          <svg className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
-          <input
-            type="text"
-            placeholder="Search by invoice number or customer..."
-            value={search}
-            onChange={(e) => handleSearch(e.target.value)}
-            className="w-full rounded-lg border border-gray-300 py-2.5 pl-10 pr-4 text-sm shadow-sm placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
+      {/* Search & Quick Filters */}
+      <div className="space-y-3">
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <div className="relative flex-1">
+            <svg className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            <input
+              type="text"
+              placeholder="Search by invoice number or customer..."
+              value={search}
+              onChange={(e) => handleSearch(e.target.value)}
+              className="w-full rounded-lg border border-gray-300 py-2.5 pl-10 pr-4 text-sm shadow-sm placeholder-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <div className="flex gap-2">
+            <select
+              value={sortBy}
+              onChange={(e) => handleFilterChange(undefined, e.target.value)}
+              className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="newest">Newest First</option>
+              <option value="oldest">Oldest First</option>
+              <option value="amount-high">Amount: High to Low</option>
+              <option value="amount-low">Amount: Low to High</option>
+              <option value="customer-az">Customer: A-Z</option>
+              <option value="customer-za">Customer: Z-A</option>
+            </select>
+            <button
+              onClick={() => setShowFilters(!showFilters)}
+              className={`flex items-center gap-1 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+                showFilters || activeFilters > 0
+                  ? "border-blue-300 bg-blue-50 text-blue-700"
+                  : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
+              }`}
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+              </svg>
+              Filters
+              {activeFilters > 0 && (
+                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-600 text-[10px] text-white">{activeFilters}</span>
+              )}
+            </button>
+          </div>
         </div>
+
         <div className="flex gap-2">
           {["", "draft", "pending", "paid", "overdue"].map((s) => (
             <button
               key={s}
-              onClick={() => handleStatusFilter(s)}
-              className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+              onClick={() => handleFilterChange(s)}
+              className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
                 filterStatus === s
                   ? "bg-blue-600 text-white"
                   : "border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
@@ -168,6 +251,44 @@ export default function InvoicesPage() {
             </button>
           ))}
         </div>
+
+        {/* Advanced Filters */}
+        {showFilters && (
+          <div className="flex flex-wrap items-end gap-4 rounded-lg border border-gray-200 bg-white p-4">
+            <div>
+              <label className="block text-xs font-medium text-gray-600">Date From</label>
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => handleFilterChange(undefined, undefined, e.target.value)}
+                className="mt-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600">Date To</label>
+              <input
+                type="date"
+                value={dateTo}
+                onChange={(e) => handleFilterChange(undefined, undefined, undefined, e.target.value)}
+                className="mt-1 rounded-lg border border-gray-300 px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            {activeFilters > 0 && (
+              <button
+                onClick={() => {
+                  setFilterStatus("");
+                  setSortBy("newest");
+                  setDateFrom("");
+                  setDateTo("");
+                  loadInvoices(search, "", "newest", "", "");
+                }}
+                className="rounded-lg px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
+              >
+                Clear Filters
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Invoice Table */}
@@ -179,9 +300,9 @@ export default function InvoicesPage() {
             </svg>
             <h3 className="mt-2 text-sm font-medium text-gray-900">No invoices found</h3>
             <p className="mt-1 text-sm text-gray-500">
-              {search || filterStatus ? "Try different search or filter." : "Get started by creating your first invoice."}
+              {search || filterStatus || dateFrom || dateTo ? "Try different search or filters." : "Get started by creating your first invoice."}
             </p>
-            {!search && !filterStatus && (
+            {!search && !filterStatus && !dateFrom && !dateTo && (
               <div className="mt-4">
                 <Link href="/invoices/new">
                   <Button size="sm">Create Invoice</Button>
@@ -213,7 +334,7 @@ export default function InvoicesPage() {
                         {inv.invoiceNumber}
                       </button>
                     </td>
-                    <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-700">{inv.customerName}</td>
+                    <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-700">{inv.customerName || "Walk-in"}</td>
                     <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-700">{formatDate(inv.invoiceDate || inv.createdAt)}</td>
                     <td className="whitespace-nowrap px-6 py-4 text-sm font-medium text-gray-900">{formatCurrency(inv.total)}</td>
                     <td className="whitespace-nowrap px-6 py-4">
@@ -248,6 +369,20 @@ export default function InvoicesPage() {
                           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                           </svg>
+                        </button>
+                        <button
+                          onClick={() => handleDuplicate(inv._id)}
+                          disabled={duplicating === inv._id}
+                          className="rounded-lg p-2 text-gray-400 hover:bg-green-50 hover:text-green-600 disabled:opacity-50"
+                          title="Duplicate"
+                        >
+                          {duplicating === inv._id ? (
+                            <div className="h-4 w-4 animate-spin rounded-full border-2 border-green-600 border-t-transparent" />
+                          ) : (
+                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" />
+                            </svg>
+                          )}
                         </button>
                         {deleteConfirm === inv._id ? (
                           <div className="flex items-center gap-1">
