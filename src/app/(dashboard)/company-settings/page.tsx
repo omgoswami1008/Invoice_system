@@ -222,19 +222,80 @@ export default function CompanySettingsPage() {
         {/* Signature */}
         <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
           <div className="border-b border-gray-200 px-6 py-4">
-            <h2 className="text-lg font-semibold text-gray-900">Signature</h2>
+            <h2 className="text-lg font-semibold text-gray-900">Authorized Signature</h2>
           </div>
-          <div className="px-6 py-4">
+          <div className="space-y-4 px-6 py-4">
             <Input
-              id="signature"
-              label="Authorized Signature"
+              id="signatureName"
+              label="Signatory Name"
               value={data.signature}
               onChange={(e) => setData({ ...data, signature: e.target.value })}
               placeholder="Authorized signatory name"
             />
-            <p className="mt-1 text-xs text-gray-500">
-              This name will appear on invoices as the authorized signatory.
-            </p>
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Signature Image</label>
+              <div className="mt-1 flex items-center gap-4">
+                <label className="flex cursor-pointer flex-col items-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50 px-6 py-4 transition-colors hover:border-blue-400 hover:bg-blue-50">
+                  <svg className="h-8 w-8 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                  <span className="mt-1 text-sm text-gray-600">Upload signature image</span>
+                  <span className="text-xs text-gray-400">PNG, JPG up to 2MB</span>
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/jpg"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      if (file.size > 2 * 1024 * 1024) {
+                        setError("Image must be under 2MB");
+                        return;
+                      }
+                      const reader = new FileReader();
+                      reader.onload = (ev) => {
+                        const img = new Image();
+                        img.onload = () => {
+                          const maxW = 400;
+                          const maxH = 150;
+                          let w = img.width;
+                          let h = img.height;
+                          if (w > maxW) { h = (h * maxW) / w; w = maxW; }
+                          if (h > maxH) { w = (w * maxH) / h; h = maxH; }
+                          const canvas = document.createElement("canvas");
+                          canvas.width = w;
+                          canvas.height = h;
+                          const ctx = canvas.getContext("2d");
+                          if (ctx) {
+                            ctx.drawImage(img, 0, 0, w, h);
+                            setData({ ...data, signature: canvas.toDataURL("image/png", 0.8) });
+                          }
+                        };
+                        img.src = ev.target?.result as string;
+                      };
+                      reader.readAsDataURL(file);
+                    }}
+                  />
+                </label>
+                {data.signature && data.signature.startsWith("data:image") && (
+                  <div className="relative">
+                    <img src={data.signature} alt="Signature" className="h-20 rounded border border-gray-200" />
+                    <button
+                      type="button"
+                      onClick={() => setData({ ...data, signature: "" })}
+                      className="absolute -right-2 -top-2 rounded-full bg-red-500 p-0.5 text-white shadow-sm hover:bg-red-600"
+                    >
+                      <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                )}
+              </div>
+              <p className="mt-2 text-xs text-gray-500">
+                Upload a signature image. It will appear on invoices as the authorized signature.
+              </p>
+            </div>
           </div>
         </div>
 

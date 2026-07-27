@@ -476,7 +476,11 @@ export default function InvoicePreviewPage() {
         {company?.signature && (
           <div className="flex justify-end pt-8 thermal-hide">
             <div className="text-center">
-              <p className="text-sm text-gray-600">{company.signature}</p>
+              {company.signature.startsWith("data:image") ? (
+                <img src={company.signature} alt="Signature" className="h-16 max-w-[200px] object-contain" />
+              ) : (
+                <p className="text-sm text-gray-600">{company.signature}</p>
+              )}
               <div className="mt-1 border-t border-gray-400 pt-1">
                 <p className="text-xs text-gray-500">Authorized Signatory</p>
               </div>

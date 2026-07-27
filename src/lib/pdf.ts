@@ -342,20 +342,31 @@ export async function generateInvoicePDF(
     y += nl.length * 4 + 4;
   }
 
-  // Signature (Gujarati)
+  // Signature
   if (company?.signature) {
     const sigY = 270;
-    setFont(doc, GJ);
-    doc.setFontSize(9);
-    doc.setTextColor(107, 114, 128);
-    doc.text(company.signature, r, sigY, { align: "right" });
+    if (company.signature.startsWith("data:image")) {
+      try {
+        doc.addImage(company.signature, "PNG", r - 50, sigY - 8, 50, 16);
+      } catch {
+        setFont(doc, GJ);
+        doc.setFontSize(9);
+        doc.setTextColor(107, 114, 128);
+        doc.text(company.signature, r, sigY, { align: "right" });
+      }
+    } else {
+      setFont(doc, GJ);
+      doc.setFontSize(9);
+      doc.setTextColor(107, 114, 128);
+      doc.text(company.signature, r, sigY, { align: "right" });
+    }
     doc.setDrawColor(156, 163, 175);
     doc.setLineWidth(0.2);
-    doc.line(r - 40, sigY + 1, r, sigY + 1);
+    doc.line(r - 50, sigY + 10, r, sigY + 10);
     setFont(doc, HR);
     doc.setFontSize(7);
     doc.setTextColor(156, 163, 175);
-    doc.text("Authorized Signatory", r, sigY + 5, { align: "right" });
+    doc.text("Authorized Signatory", r, sigY + 14, { align: "right" });
   }
 
   // Footer
