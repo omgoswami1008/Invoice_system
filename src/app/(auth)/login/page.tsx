@@ -69,7 +69,7 @@ export default function LoginPage() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="admin@invoice.com"
+              placeholder="enter the your email"
             />
             <Input
               id="password"
